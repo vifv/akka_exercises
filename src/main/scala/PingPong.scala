@@ -1,52 +1,59 @@
-import akka.actor.{Actor, ActorRef, ActorSystem, Props}
+import PingPong.system
+import akka.actor.{Actor, ActorRef, ActorSelection, ActorSystem, Props}
+import akka.pattern.AskSupport
+import akka.util.Timeout
+
 import language.postfixOps
-import scala.concurrent.duration._
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.ExecutionContextExecutor
+import scala.concurrent.duration.DurationInt
 
-case object Ping
-case object Pong
-case object MissedBall
+case class Ping()
 
-class actorB extends Actor {
-  var countDown = 0
+case class Pong()
 
-  def receive = {
+case class MissedBall()
+
+class ActorA extends Actor with AskSupport {
+  implicit val timeout: Timeout = Timeout(5 seconds)
+  val ex: ExecutionContextExecutor = context.dispatcher
+  val actorB: ActorSelection = system.actorSelection("akka://pingpong/user/ponger")
+
+  override def preStart: Unit = {
+    self ! Ping
+  }
+
+  override def receive: Receive = {
+    case Ping =>
+      println("Ping")
+      (actorB ? Pong).mapTo[Pong].map { x=>
+        self ! Ping
+      }
+
+    case MissedBall =>
+      println("Ping")
+      self ! Ping
+  }
+}
+
+class ActorB extends Actor {
+
+  override def receive: Receive = {
     case Pong =>
-      if (countDown < 4) {
-        countDown += 1
+      if (scala.util.Random.nextInt(100) > 10) {
         println("Pong")
         sender() ! Ping
       } else {
         println("Мяч упущен")
-        countDown = 0
         sender() ! MissedBall
       }
   }
 }
 
-class actorA(actorB: ActorRef) extends Actor {
-  def receive = {
-    case Ping =>
-      println("Ping")
-      actorB ! Pong
-
-    case MissedBall =>
-      println("Ping")
-      actorB ! Pong
-  }
-}
-
-
 object PingPong extends App {
+
   val system = ActorSystem("pingpong")
 
-  val pinger = system.actorOf(Props[actorB](), "pinger")
-
-  val ponger = system.actorOf(Props(classOf[actorA], pinger), "ponger")
-
-  import system.dispatcher
-
-  system.scheduler.scheduleOnce(500 millis) {
-    ponger ! Ping
-  }
+  val pinger: ActorRef = system.actorOf(Props[ActorB](), "ponger")
+  val ponger: ActorRef = system.actorOf(Props[ActorA](), "pinger")
 }
-
